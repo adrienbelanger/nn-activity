@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Doodle NN Lab</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.21.0/dist/tf.min.js"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial}h2{margin:0 0 8px 0;font-size:18px}h3{margin:0 0 6px 0;font-size:14px;color:#555}button,select,input[type=range]{font:inherit}#app{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;height:100vh;gap:10px;padding:10px;background:#f5f5f7}
+.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:12px;display:flex;flex-direction:column}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;background:#eee}
+.badge.ok{background:#e6ffed;color:#096c3b}
+.badge.warn{background:#fff7e6;color:#8a5a00}
+.badge.lock{background:#e6f0ff;color:#1b4ed4}
+.split{display:flex;gap:10px;align-items:center}
+.grid{display:grid;gap:8px}.thumbs{display:grid;grid-template-columns:repeat(auto-fill,34px);gap:6px;align-content:start;overflow:auto;max-height:220px;border:1px solid #eee;border-radius:8px;padding:6px;background:#fafafa}
+.thumb{width:32px;height:32px;border:1px solid #ddd;border-radius:4px;position:relative}
+.thumb.test::after{content:"T";position:absolute;top:-6px;right:-6px;background:#1b4ed4;color:#fff;font-size:10px;border-radius:999px;padding:1px 3px}
+.panel-title{display:flex;justify-content:space-between;align-items:center}
+.controls{display:grid;grid-template-columns:repeat(4, minmax(80px,1fr));gap:8px}
+.metrics{display:flex;gap:10px;align-items:center}
+#draw,#testpad{border:1px solid #ddd;background:#fff;border-radius:8px;touch-action:none}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;align-items:center}
+.progress{height:6px;background:#eee;border-radius:999px;overflow:hidden}
+.progress>div{height:100%;background:#1b4ed4;width:0%}
+#filters{display:grid;grid-template-columns:repeat(8, 34px);gap:6px;align-content:start;overflow:auto;max-height:140px}
+.filter{width:32px;height:32px;border:1px solid #ddd;border-radius:4px}
+.confmat{border-collapse:collapse} .confmat td,.confmat th{border:1px solid #ddd;padding:4px 6px;text-align:center;font-size:12px}
+.counts{font-size:12px;color:#666}
+.actions{display:flex;gap:8px;align-items:center}
+.legend{display:flex;gap:8px;align-items:center;font-size:12px}
+.bar{height:10px;background:#1b4ed4}
+.predrow{display:grid;grid-template-columns:60px 1fr 40px;gap:8px;align-items:center}
+</style>
+</head>
+<body>
+<div class="row" style="padding:8px 12px;background:#0f172a;color:#fff;align-items:center">
+<div style="font-weight:600">Doodle NN Lab</div>
+<div class="legend" style="margin-left:auto">
+<span class="badge">No Blockly</span>
+<span class="badge">Stratified split</span>
+<span class="badge">Test locks after training</span>
+</div>
+</div>
+<div id="app">
+<div class="card" id="pane-draw">
+<div class="panel-title"><h2>Draw Samples</h2><div class="badge" id="classCounts"></div></div>
+<div class="row">
+<div class="row">
+<label><input type="radio" name="label" value="Happy" checked> Happy</label>
+<label><input type="radio" name="label" value="Sad"> Sad</label>
+<label><input type="radio" name="label" value="Neutral"> Neutral</label>
+</div>
+<div class="actions">
+<button id="clear">Clear</button>
+<button id="add">Add Sample</button>
+</div>
+</div>
+<canvas id="draw" width="224" height="224"></canvas>
+<div class="row" style="margin-top:8px">
+<label>Brush</label>
+<input type="range" id="brush" min="2" max="24" value="12">
+</div>
+</div>
+<div class="card" id="pane-dataset">
+<div class="panel-title"><h2>Dataset & Split</h2><span id="lockBadge" class="badge">Test unlocked</span></div>
+<div class="row split">
+<label>Train%</label>
+<input type="range" id="split" min="50" max="90" value="70">
+<span id="splitLabel">70/30</span>
+</div>
+<div class="counts" id="splitCounts"></div>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:8px">
+<div>
+<h3>Happy</h3>
+<div id="thumb-happy" class="thumbs"></div>
+</div>
+<div>
+<h3>Sad</h3>
+<div id="thumb-sad" class="thumbs"></div>
+</div>
+<div>
+<h3>Neutral</h3>
+<div id="thumb-neutral" class="thumbs"></div>
+</div>
+</div>
+</div>
+<div class="card" id="pane-nn">
+<div class="panel-title"><h2>Neural Network</h2><div class="metrics"><span id="trainBadge" class="badge">Train: –</span><span id="testBadge" class="badge">Test: –</span></div></div>
+<div class="controls">
+<div class="kv"><label>Filters</label><select id="filtersSel"><option value="4">4</option><option value="8">8</option></select></div>
+<div class="kv"><label>Hidden</label><select id="hiddenSel"><option value="0">0</option><option value="16">16</option><option value="32">32</option><option value="64">64</option></select></div>
+<div class="kv"><label>Activation</label><select id="actSel"><option value="relu">ReLU</option><option value="tanh">tanh</option></select></div>
+<div class="kv"><label>Dropout</label><select id="dropSel"><option value="0">0</option><option value="0.2">0.2</option></select></div>
+<div class="kv"><label>Epochs</label><input type="range" id="epochs" min="3" max="20" value="8"></div>
+<div class="kv"><label>Batch</label><input type="range" id="batch" min="8" max="64" value="32" step="8"></div>
+<div class="kv actions"><button id="train">Train</button><button id="reset">Reset</button></div>
+</div>
+<div style="margin-top:10px">
+<div style="font-size:12px;color:#666;margin-bottom:6px">First-layer filters</div>
+<div id="filters" ></div>
+</div>
+</div>
+<div class="card" id="pane-test">
+<div class="panel-title"><h2>Tester</h2><span class="badge" id="warnBadge">Ready</span></div>
+<canvas id="testpad" width="224" height="224"></canvas>
+<div class="row" style="margin-top:8px">
+<button id="testclear">Clear</button>
+<button id="predict">Predict</button>
+</div>
+<div style="margin-top:10px">
+<div class="predrow"><div>Happy</div><div class="bar" id="bar-happy"></div><div id="prob-happy">–</div></div>
+<div class="predrow"><div>Sad</div><div class="bar" id="bar-sad"></div><div id="prob-sad">–</div></div>
+<div class="predrow"><div>Neutral</div><div class="bar" id="bar-neutral"></div><div id="prob-neutral">–</div></div>
+</div>
+<div style="margin-top:12px">
+<h3>Confusion Matrix (Test)</h3>
+<table class="confmat" id="cm"></table>
+</div>
+</div>
+</div>
+<script>
+const labels=["Happy","Sad","Neutral"]
+const state={samples:[],rngSeed:12345,splitPct:0.7,testLocked:false,model:null,stats:{trainAcc:null,testAcc:null},arch:{filters:4,hidden:0,activation:"relu",dropout:0},classCounts:{},trainIds:new Set(),testIds:new Set()}
+const draw=document.getElementById("draw")
+const testpad=document.getElementById("testpad")
+const ctx=draw.getContext("2d")
+const tctx=testpad.getContext("2d")
+let drawing=false,brush=12
+function resetCanvas(c,ctx){ctx.fillStyle="#fff";ctx.fillRect(0,0,c.width,c.height);ctx.lineWidth=brush;ctx.lineCap="round";ctx.strokeStyle="#000"}
+resetCanvas(draw,ctx);resetCanvas(testpad,tctx)
+function onPointer(canvas,ctx){
+let p=false,prev=null
+canvas.addEventListener("pointerdown",e=>{p=true;prev={x:e.offsetX,y:e.offsetY};ctx.beginPath();ctx.moveTo(prev.x,prev.y)})
+canvas.addEventListener("pointermove",e=>{if(!p)return;ctx.lineWidth=brush;ctx.lineTo(e.offsetX,e.offsetY);ctx.stroke()})
+window.addEventListener("pointerup",()=>{p=false;prev=null})
+}
+onPointer(draw,ctx);onPointer(testpad,tctx)
+document.getElementById("brush").addEventListener("input",e=>{brush=parseInt(e.target.value)})
+document.getElementById("clear").addEventListener("click",()=>resetCanvas(draw,ctx))
+document.getElementById("testclear").addEventListener("click",()=>resetCanvas(testpad,tctx))
+function currentLabel(){return document.querySelector("input[name=label]:checked").value}
+function to28x28(canvas){
+const tmp=document.createElement("canvas");tmp.width=28;tmp.height=28
+const t=tmp.getContext("2d");t.fillStyle="#fff";t.fillRect(0,0,28,28);t.drawImage(canvas,0,0,28,28)
+const img=t.getImageData(0,0,28,28).data
+const arr=new Float32Array(28*28)
+for(let i=0,j=0;i<img.length;i+=4,j++){const r=img[i],g=img[i+1],b=img[i+2];const gray=(r+g+b)/3/255;arr[j]=1-gray}
+return arr
+}
+function seedRand(seed){let s=seed%2147483647;if(s<=0)s+=2147483646;return()=>{s=s*16807%2147483647;return(s-1)/2147483646}}
+function stratifiedSplit(){
+state.trainIds.clear();state.testIds.clear()
+const rnd=seedRand(state.rngSeed)
+for(const lab of labels){
+const idx=state.samples.map((s,i)=>[s,i]).filter(([s,i])=>s.label===lab).map(([s,i])=>i)
+for(let i=idx.length-1;i>0;i--){const j=Math.floor(rnd()* (i+1));[idx[i],idx[j]]=[idx[j],idx[i]]}
+const nTrain=Math.floor(idx.length*state.splitPct)
+for(let i=0;i<idx.length;i++){const id=idx[i];if(i<nTrain)state.trainIds.add(id);else state.testIds.add(id)}
+}
+}
+function addSample(){
+const data=to28x28(draw)
+state.samples.push({id:Date.now()+"_"+Math.random(),label:currentLabel(),data})
+renderThumbs();updateCounts()
+if(!state.testLocked){stratifiedSplit();renderThumbs();updateCounts()}
+}
+function renderThumbs(){
+const maps={"Happy":"thumb-happy","Sad":"thumb-sad","Neutral":"thumb-neutral"}
+for(const lab of labels){const box=document.getElementById(maps[lab]);box.innerHTML=""}
+state.classCounts={}
+for(let i=0;i<state.samples.length;i++){
+const s=state.samples[i];state.classCounts[s.label]=(state.classCounts[s.label]||0)+1
+const c=document.createElement("canvas");c.width=32;c.height=32;c.className="thumb"+(state.testIds.has(i)?" test":"")
+const k=c.getContext("2d");k.fillStyle="#fff";k.fillRect(0,0,32,32)
+const img=document.createElement("canvas");img.width=28;img.height=28
+const ig=img.getContext("2d")
+const im=ig.createImageData(28,28)
+for(let p=0;p<28*28;p++){const v=Math.max(0,Math.min(1,s.data[p]));const x=p*4;const g=255*(1-v);im.data[x]=g;im.data[x+1]=g;im.data[x+2]=g;im.data[x+3]=255}
+ig.putImageData(im,0,0);k.imageSmoothingEnabled=false;k.drawImage(img,2,2,28,28)
+c.addEventListener("click",()=>{if(state.testLocked&&state.testIds.has(i))return;state.samples.splice(i,1);renderThumbs();updateCounts();if(!state.testLocked){stratifiedSplit();renderThumbs();updateCounts()}})
+const maps={"Happy":"thumb-happy","Sad":"thumb-sad","Neutral":"thumb-neutral"}
+document.getElementById(maps[s.label]).appendChild(c)
+}
+}
+function updateCounts(){
+const total=state.samples.length
+const perClass=labels.map(l=>state.samples.filter(s=>s.label===l).length)
+const trainCounts=labels.map(l=>state.samples.map((s,i)=>[s,i]).filter(([s,i])=>s.label===l&&state.trainIds.has(i)).length)
+const testCounts=labels.map(l=>state.samples.map((s,i)=>[s,i]).filter(([s,i])=>s.label===l&&state.testIds.has(i)).length)
+document.getElementById("classCounts").textContent=labels.map((l,i)=>l+":"+perClass[i]).join("  ")
+document.getElementById("splitCounts").textContent="Train "+trainCounts.join("/")+"  ·  Test "+testCounts.join("/")
+const sp=document.getElementById("split").value
+document.getElementById("splitLabel").textContent=sp+"/"+(100-sp)
+}
+document.getElementById("add").addEventListener("click",addSample)
+document.getElementById("split").addEventListener("input",e=>{
+if(state.testLocked){document.getElementById("lockBadge").textContent="Test locked";document.getElementById("lockBadge").className="badge lock";e.target.value=Math.round(state.splitPct*100);return}
+state.splitPct=parseInt(e.target.value)/100;stratifiedSplit();renderThumbs();updateCounts()
+})
+document.getElementById("filtersSel").addEventListener("change",e=>{state.arch.filters=parseInt(e.target.value)})
+document.getElementById("hiddenSel").addEventListener("change",e=>{state.arch.hidden=parseInt(e.target.value)})
+document.getElementById("actSel").addEventListener("change",e=>{state.arch.activation=e.target.value})
+document.getElementById("dropSel").addEventListener("change",e=>{state.arch.dropout=parseFloat(e.target.value)})
+function buildModel(){
+if(state.model){state.model.dispose();state.model=null}
+const m=tf.sequential()
+m.add(tf.layers.conv2d({inputShape:[28,28,1],filters:state.arch.filters,kernelSize:3,activation:state.arch.activation,padding:"same"}))
+m.add(tf.layers.maxPooling2d({poolSize:2,strides:2}))
+m.add(tf.layers.flatten())
+if(state.arch.hidden>0){m.add(tf.layers.dense({units:state.arch.hidden,activation:state.arch.activation}))}
+if(state.arch.dropout>0){m.add(tf.layers.dropout({rate:state.arch.dropout}))}
+m.add(tf.layers.dense({units:labels.length,activation:"softmax"}))
+m.compile({optimizer:tf.train.adam(),loss:"categoricalCrossentropy",metrics:["accuracy"]})
+state.model=m
+renderFilters()
+}
+function tensorsFrom(ids){
+const xs=new Float32Array(ids.length*28*28)
+const ys=new Float32Array(ids.length*labels.length)
+for(let i=0;i<ids.length;i++){
+const s=state.samples[ids[i]]
+xs.set(s.data,i*28*28)
+const li=labels.indexOf(s.label)
+ys[i*labels.length+li]=1
+}
+const xt=tf.tensor4d(xs,[ids.length,28,28,1])
+const yt=tf.tensor2d(ys,[ids.length,labels.length])
+return[xt,yt]
+}
+async function train(){
+if(state.samples.length<6)return
+buildModel()
+if(!state.testLocked){state.testLocked=true;document.getElementById("lockBadge").textContent="Test locked";document.getElementById("lockBadge").className="badge lock"}
+const trainIdx=[...state.trainIds];const testIdx=[...state.testIds]
+if(trainIdx.length===0||testIdx.length===0)return
+const [xtr,ytr]=tensorsFrom(trainIdx);const [xte,yte]=tensorsFrom(testIdx)
+const epochs=parseInt(document.getElementById("epochs").value)
+const batch=parseInt(document.getElementById("batch").value)
+let lastAcc=0
+await state.model.fit(xtr,ytr,{epochs,batchSize:batch,validationData:[xte,yte],verbose:0,callbacks:{onEpochEnd:(e,logs)=>{lastAcc=logs.acc||logs.accuracy;document.getElementById("trainBadge").textContent="Train: "+((lastAcc||0)*100).toFixed(1)+"%"}}})
+const evalRes=state.model.evaluate(xte,yte);const testAcc=(await evalRes[1].data())[0]
+document.getElementById("testBadge").textContent="Test: "+(testAcc*100).toFixed(1)+"%"
+renderFilters()
+renderConfMat()
+xtr.dispose();ytr.dispose();xte.dispose();yte.dispose()
+}
+function renderFilters(){
+const box=document.getElementById("filters");box.innerHTML=""
+if(!state.model)return
+const w=state.model.getWeights()[0].arraySync()
+const kh=w.length,kw=w[0].length,out=w[0][0][0].length
+for(let f=0;f<out;f++){
+const c=document.createElement("canvas");c.width=32;c.height=32;c.className="filter"
+const g=c.getContext("2d");g.fillStyle="#fff";g.fillRect(0,0,32,32)
+const cell=4
+for(let y=0;y<kh;y++){for(let x=0;x<kw;x++){const v=w[y][x][0][f];const n=Math.max(0,Math.min(1,(v+0.5)));g.fillStyle="rgb("+Math.floor(255*(1-n))+","+Math.floor(255*(1-n))+","+Math.floor(255*(1-n))+")";g.fillRect(x*cell+4,y*cell+4,cell,cell)}}
+box.appendChild(c)
+}
+}
+function predictCanvas(canvas){
+if(!state.model)return null
+const arr=to28x28(canvas)
+const xt=tf.tensor4d(arr,[1,28,28,1])
+const y=state.model.predict(xt)
+return y.data().then(v=>{xt.dispose();y.dispose();return Array.from(v)})
+}
+document.getElementById("train").addEventListener("click",train)
+document.getElementById("reset").addEventListener("click",()=>{state.testLocked=false;document.getElementById("lockBadge").textContent="Test unlocked";document.getElementById("lockBadge").className="badge";state.stats={};renderFilters();document.getElementById("trainBadge").textContent="Train: –";document.getElementById("testBadge").textContent="Test: –"})
+document.getElementById("predict").addEventListener("click",async()=>{
+const probs=await predictCanvas(testpad);if(!probs)return
+const bars={"Happy":"bar-happy","Sad":"bar-sad","Neutral":"bar-neutral"},pro={"Happy":"prob-happy","Sad":"prob-sad","Neutral":"prob-neutral"}
+for(let i=0;i<labels.length;i++){const name=labels[i];const p=probs[i];document.getElementById(bars[name]).style.width=Math.round(p*100)+"%";document.getElementById(pro[name]).textContent=(p*100).toFixed(1)+"%"}
+})
+function renderConfMat(){
+const testIdx=[...state.testIds];if(!state.model||testIdx.length===0){document.getElementById("cm").innerHTML="";return}
+const n=labels.length
+const cm=Array.from({length:n},()=>Array(n).fill(0))
+const xs=new Float32Array(testIdx.length*28*28)
+for(let i=0;i<testIdx.length;i++){xs.set(state.samples[testIdx[i]].data,i*28*28)}
+const xt=tf.tensor4d(xs,[testIdx.length,28,28,1])
+const y=state.model.predict(xt)
+y.array().then(arr=>{
+for(let i=0;i<testIdx.length;i++){const lab=labels.indexOf(state.samples[testIdx[i]].label);const pred=arr[i].indexOf(Math.max(...arr[i]));cm[lab][pred]+=1}
+const tbl=document.getElementById("cm");let html="<tr><th></th>"+labels.map(l=>"<th>"+l+"</th>").join("")+"</tr>"
+for(let r=0;r<n;r++){html+="<tr><th>"+labels[r]+"</th>"+cm[r].map(v=>"<td>"+v+"</td>").join("")+"</tr>"}
+tbl.innerHTML=html;xt.dispose();y.dispose()
+})
+}
+renderThumbs();updateCounts()
+</script>
+</body>
+</html>
